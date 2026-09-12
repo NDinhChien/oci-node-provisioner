@@ -11,11 +11,12 @@ config = {
     "key_content": os.getenv("OCI_PRIVATE_KEY"),
     "fingerprint": os.getenv("OCI_FINGERPRINT"),
     "tenancy": os.getenv("OCI_TENANCY_ID"),
-    "region": os.getenv("OCI_REGION")
+    "region": os.getenv("OCI_REGION"),
 }
 
 try:
     compute_client = oci.core.ComputeClient(config)
+    identity_client = oci.identity.IdentityClient(config)
     print("OCI Authentication Successful. Initializing loop sequence...")
 except Exception as e:
     print(f"Authentication Failed: {e}")
@@ -25,22 +26,47 @@ except Exception as e:
 compartment_id = os.getenv("OCI_TENANCY_ID")
 subnet_id = os.getenv("OCI_SUBNET_ID")
 image_id = os.getenv("OCI_IMAGE_ID")
-public_ssh_key = os.getenv("OCI_PUBLIC_SSH_KEY") 
+public_ssh_key = os.getenv("OCI_PUBLIC_SSH_KEY")
+
+# Instance sizing (override via env vars if you want, defaults to a small
+# request first since small shapes succeed far more often than 4/24)
+target_ocpus = float(os.getenv("OCI_OCPUS", "1"))
+target_memory_gbs = float(os.getenv("OCI_MEMORY_GBS", "6"))
 
 # SAFETY CHECK: Verify the key actually loaded from GitHub Secrets
 if not public_ssh_key or public_ssh_key.strip() == "":
     print("CRITICAL ERROR: OCI_PUBLIC_SSH_KEY is empty or missing from your secrets!")
     exit(1)
 
-# Availability Domains to cycle through
-ads = ["uufj:PHX-AD-1", "uufj:PHX-AD-2", "uufj:PHX-AD-3"]
+if not subnet_id or not image_id:
+    print("CRITICAL ERROR: OCI_SUBNET_ID or OCI_IMAGE_ID is missing!")
+    exit(1)
 
-total_attempts = 60 
+# Dynamically fetch real Availability Domain names for this tenancy/region
+# instead of hardcoding a guessed prefix (tenancy-specific, e.g. "uufj:...").
+try:
+    ad_response = identity_client.list_availability_domains(compartment_id=compartment_id)
+    ads = [ad.name for ad in ad_response.data]
+    if not ads:
+        raise RuntimeError("No availability domains returned")
+    print(f"Discovered Availability Domains: {ads}")
+except Exception as e:
+    print(f"Failed to list availability domains: {e}")
+    exit(1)
+
+total_attempts = 60
+base_capacity_sleep = 60       # normal wait after "out of capacity"
+rate_limit_sleep = 300         # longer wait after 429 / TooManyRequests
+generic_error_sleep = 60       # wait after any other unexpected error
+max_backoff = 900              # cap exponential backoff at 15 minutes
+
+consecutive_rate_limits = 0
 
 for i in range(1, total_attempts + 1):
     current_ad = ads[(i - 1) % len(ads)]
-    print(f"[Attempt {i}/{total_attempts}] Requesting instance in {current_ad}...")
-    
+    print(f"[Attempt {i}/{total_attempts}] Requesting instance in {current_ad} "
+          f"({target_ocpus} OCPU / {target_memory_gbs} GB)...")
+
     try:
         request = oci.core.models.LaunchInstanceDetails(
             display_name="FX-Backend-Server",
@@ -48,35 +74,68 @@ for i in range(1, total_attempts + 1):
             availability_domain=current_ad,
             shape="VM.Standard.A1.Flex",
             shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
-                ocpus=4,
-                memory_in_gbs=24
+                ocpus=target_ocpus,
+                memory_in_gbs=target_memory_gbs,
             ),
             source_details=oci.core.models.InstanceSourceViaImageDetails(
                 source_type="image",
                 image_id=image_id,
-                boot_volume_size_in_gbs=100
+                boot_volume_size_in_gbs=100,
             ),
             create_vnic_details=oci.core.models.CreateVnicDetails(
                 subnet_id=subnet_id,
                 assign_public_ip=True,
                 assign_private_dns_record=True,
-                display_name="forexalertsvnic"
+                display_name="forexalertsvnic",
             ),
             metadata={
                 "ssh_authorized_keys": str(public_ssh_key).strip()
-            }
+            },
         )
-        
+
         response = compute_client.launch_instance(request)
         if response.status == 200:
-            print("SUCCESS! Authorized Server creation initialized perfectly.")
+            print("SUCCESS! Instance creation initialized.")
             exit(0)
-            
+
     except oci.exceptions.ServiceError as e:
-        if "Out of host capacity" in str(e) or e.status == 500:
-            print(f"-> Capacity Unavailable. Resting 60 seconds...")
+        status = getattr(e, "status", None)
+        message = str(e)
+
+        if status == 429 or "TooManyRequests" in message or "Too many requests" in message:
+            consecutive_rate_limits += 1
+            # exponential backoff, capped, so repeated rate limits don't
+            # keep hammering the API at the same interval
+            wait_time = min(rate_limit_sleep * (2 ** (consecutive_rate_limits - 1)), max_backoff)
+            print(f"-> Rate limited by OCI API. Backing off {wait_time}s...")
+            time.sleep(wait_time)
+            continue
+
+        consecutive_rate_limits = 0
+
+        if "Out of host capacity" in message or status == 500:
+            print(f"-> Capacity unavailable in {current_ad}. Resting {base_capacity_sleep}s...")
+            time.sleep(base_capacity_sleep)
+        elif status == 400:
+            print(f"-> Bad request (check subnet/image/shape config): {e.message}")
+            time.sleep(generic_error_sleep)
+        elif status == 401 or status == 404:
+            print(f"-> Auth/resource error, check credentials and OCIDs: {e.message}")
+            exit(1)  # no point retrying, config is wrong
         else:
-            print(f"-> API Error: {e.message}")
-            
+            print(f"-> API Error ({status}): {e.message}")
+            time.sleep(generic_error_sleep)
+
+    except Exception as e:
+        # Catch anything not covered by ServiceError (network blips, etc.)
+        # so one unexpected error doesn't kill the whole run early.
+        consecutive_rate_limits = 0
+        print(f"-> Unexpected error: {e}")
+        time.sleep(generic_error_sleep)
+
     if i < total_attempts:
-        time.sleep(60)
+        # small base delay between attempts even on success-adjacent paths
+        time.sleep(2)
+
+print("Exhausted all attempts without a successful launch.")
+exit(1)

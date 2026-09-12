@@ -1,0 +1,5 @@
+.env
+*.pem
+ssh_key_for_env.txt
+key_for_env.txt
+note.txt
