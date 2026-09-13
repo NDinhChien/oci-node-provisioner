@@ -1,12 +1,19 @@
 name: Continuous OCI Python SDK Provisioner Loop
 on:
   schedule:
-    - cron: '*/5 * * * *'  # Runs every 5 minutes automatically
-  workflow_dispatch:       # Allows manual execution triggers
+    - cron: '*/20 * * * *'   # every 20 minutes — 5 min was too aggressive
+                              # and likely caused your earlier 429 errors
+  workflow_dispatch:         # allows manual execution triggers
+
+concurrency:
+  group: oci-a1-provisioner
+  cancel-in-progress: false  # never cancel a run that might be mid-retry
 
 jobs:
   attempt-build:
     runs-on: ubuntu-latest
+    timeout-minutes: 55
+
     steps:
       - name: Check out repository code
         uses: actions/checkout@v4
@@ -29,6 +36,7 @@ jobs:
           OCI_REGION: ${{ secrets.OCI_REGION }}
           OCI_SUBNET_ID: ${{ secrets.OCI_SUBNET_ID }}
           OCI_IMAGE_ID: ${{ secrets.OCI_IMAGE_ID }}
-          # ADD THIS RUNNER MAPPING LINE RIGHT HERE:
-          OCI_PUBLIC_SSH_KEY: ${{ secrets.OCI_PUBLIC_SSH_KEY }} 
+          OCI_PUBLIC_SSH_KEY: ${{ secrets.OCI_PUBLIC_SSH_KEY }}
+          OCI_OCPUS: ${{ secrets.OCI_OCPUS }}
+          OCI_MEMORY_GBS: ${{ secrets.OCI_MEMORY_GBS }}
         run: python "Ampere24ram4cpu/bot.py"
