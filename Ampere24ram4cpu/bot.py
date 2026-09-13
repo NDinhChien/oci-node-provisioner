@@ -6,9 +6,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Setup configuration from environment variables
+# The private key sometimes arrives with literal "\n" characters instead of
+# real newlines (e.g. when pasted from a wrapped/escaped .env value). This
+# converts those back into actual line breaks so the SDK can parse the PEM.
+# If the key already has real newlines (e.g. pasted raw into GitHub Secrets),
+# this replace is a harmless no-op.
+raw_private_key = os.getenv("OCI_PRIVATE_KEY", "")
+private_key_content = raw_private_key.replace("\\n", "\n")
+
 config = {
     "user": os.getenv("OCI_USER_ID"),
-    "key_content": os.getenv("OCI_PRIVATE_KEY"),
+    "key_content": private_key_content,
     "fingerprint": os.getenv("OCI_FINGERPRINT"),
     "tenancy": os.getenv("OCI_TENANCY_ID"),
     "region": os.getenv("OCI_REGION"),
