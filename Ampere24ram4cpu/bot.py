@@ -11,7 +11,9 @@ load_dotenv()
 # converts those back into actual line breaks so the SDK can parse the PEM.
 # If the key already has real newlines (e.g. pasted raw into GitHub Secrets),
 # this replace is a harmless no-op.
-raw_private_key = os.getenv("OCI_PRIVATE_KEY", "")
+raw_private_key = os.getenv("OCI_PRIVATE_KEY", "").strip()
+if len(raw_private_key) >= 2 and raw_private_key[0] == raw_private_key[-1] and raw_private_key[0] in ("'", '"'):
+    raw_private_key = raw_private_key[1:-1]
 private_key_content = raw_private_key.replace("\\n", "\n")
 
 config = {
@@ -34,7 +36,17 @@ except Exception as e:
 compartment_id = os.getenv("OCI_TENANCY_ID")
 subnet_id = os.getenv("OCI_SUBNET_ID")
 image_id = os.getenv("OCI_IMAGE_ID")
-public_ssh_key = os.getenv("OCI_PUBLIC_SSH_KEY")
+
+# Strip accidental leading/trailing quote characters. This happens when a
+# secret is pasted including the surrounding quotes from a .env-style line
+# (e.g. OCI_PUBLIC_SSH_KEY="ssh-ed25519 ...") instead of just the raw value.
+def _strip_wrapping_quotes(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        value = value[1:-1]
+    return value.strip()
+
+public_ssh_key = _strip_wrapping_quotes(os.getenv("OCI_PUBLIC_SSH_KEY", ""))
 
 # Instance sizing (override via env vars if you want, defaults to a small
 # request first since small shapes succeed far more often than 4/24)
@@ -49,6 +61,25 @@ if not public_ssh_key or public_ssh_key.strip() == "":
 if not subnet_id or not image_id:
     print("CRITICAL ERROR: OCI_SUBNET_ID or OCI_IMAGE_ID is missing!")
     exit(1)
+
+# SAFETY CHECK: Skip launching if an instance with this display name already
+# exists and isn't terminated. This prevents duplicate instances from being
+# created by a later scheduled run after an earlier run already succeeded.
+INSTANCE_DISPLAY_NAME = "FX-Backend-Server"
+NON_TERMINAL_STATES = {"PROVISIONING", "RUNNING", "STARTING", "STOPPING", "STOPPED", "CREATING_IMAGE"}
+
+try:
+    existing = compute_client.list_instances(
+        compartment_id=compartment_id,
+        display_name=INSTANCE_DISPLAY_NAME,
+    ).data
+    active_existing = [inst for inst in existing if inst.lifecycle_state in NON_TERMINAL_STATES]
+    if active_existing:
+        print(f"Instance '{INSTANCE_DISPLAY_NAME}' already exists "
+              f"(state: {active_existing[0].lifecycle_state}). Skipping launch.")
+        exit(0)
+except oci.exceptions.ServiceError as e:
+    print(f"Warning: could not check for existing instances ({e}). Proceeding with launch attempt.")
 
 # Dynamically fetch real Availability Domain names for this tenancy/region
 # instead of hardcoding a guessed prefix (tenancy-specific, e.g. "uufj:...").
