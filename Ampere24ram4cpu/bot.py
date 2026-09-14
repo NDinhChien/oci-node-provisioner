@@ -93,11 +93,11 @@ except Exception as e:
     print(f"Failed to list availability domains: {e}")
     exit(1)
 
-total_attempts = 60
-base_capacity_sleep = 60       # normal wait after "out of capacity"
-rate_limit_sleep = 300         # longer wait after 429 / TooManyRequests
-generic_error_sleep = 60       # wait after any other unexpected error
-max_backoff = 900              # cap exponential backoff at 15 minutes
+total_attempts = 300            # ~5 hours of continuous retrying at 60s/attempt
+base_capacity_sleep = 60        # normal wait after "out of capacity"
+rate_limit_sleep = 300          # longer wait after 429 / TooManyRequests
+generic_error_sleep = 60        # wait after any other unexpected error
+max_backoff = 900               # cap exponential backoff at 15 minutes
 
 consecutive_rate_limits = 0
 
