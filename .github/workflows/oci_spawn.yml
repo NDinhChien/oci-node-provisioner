@@ -1,8 +1,9 @@
 name: Continuous OCI Python SDK Provisioner Loop
 on:
   schedule:
-    - cron: '*/20 * * * *'   # every 20 minutes — 5 min was too aggressive
-                              # and likely caused your earlier 429 errors
+    - cron: '0 */6 * * *'    # every 6 hours — matches the ~5h50m job runtime
+                              # below, so the next run starts right as the
+                              # previous one wraps up instead of queuing
   workflow_dispatch:         # allows manual execution triggers
 
 concurrency:
@@ -12,7 +13,7 @@ concurrency:
 jobs:
   attempt-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 350     # ~5h50m, safely under GitHub's 6-hour hard cap
 
     steps:
       - name: Check out repository code
