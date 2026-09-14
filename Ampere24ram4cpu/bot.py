@@ -1,5 +1,6 @@
 import oci
 import os
+import random
 import time
 from dotenv import load_dotenv
 
@@ -93,11 +94,14 @@ except Exception as e:
     print(f"Failed to list availability domains: {e}")
     exit(1)
 
-total_attempts = 60
-base_capacity_sleep = 60       # normal wait after "out of capacity"
-rate_limit_sleep = 300         # longer wait after 429 / TooManyRequests
-generic_error_sleep = 60       # wait after any other unexpected error
-max_backoff = 900              # cap exponential backoff at 15 minutes
+total_attempts = 300              # fewer, more widely-spaced attempts
+base_capacity_sleep = 180         # 3 min base — 45-65s was still tripping
+                                   # OCI's LaunchInstance rate limit
+capacity_jitter = 30              # +/- random seconds, still desynced
+                                   # from other scripts but off a larger base
+rate_limit_sleep = 300            # longer wait after 429 / TooManyRequests
+generic_error_sleep = 60          # wait after any other unexpected error
+max_backoff = 900                 # cap exponential backoff at 15 minutes
 
 consecutive_rate_limits = 0
 
@@ -153,8 +157,10 @@ for i in range(1, total_attempts + 1):
         consecutive_rate_limits = 0
 
         if "Out of host capacity" in message or status == 500:
-            print(f"-> Capacity unavailable in {current_ad}. Resting {base_capacity_sleep}s...")
-            time.sleep(base_capacity_sleep)
+            wait_time = base_capacity_sleep + random.randint(-capacity_jitter, capacity_jitter)
+            wait_time = max(wait_time, 10)  # never sleep less than 10s
+            print(f"-> Capacity unavailable in {current_ad}. Resting {wait_time}s...")
+            time.sleep(wait_time)
         elif status == 400:
             print(f"-> Bad request (check subnet/image/shape config): {e.message}")
             time.sleep(generic_error_sleep)
