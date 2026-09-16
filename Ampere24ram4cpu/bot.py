@@ -96,7 +96,7 @@ def _parse_memory_options(raw: str, default: list) -> list:
 
 
 OCPUS = _parse_ocpus(os.getenv("OCI_OCPUS", ""), default=1)
-MEMORY_OPTIONS_GBS = _parse_memory_options(os.getenv("OCI_MEMORY_GBS", ""), default=[2, 4, 6])
+MEMORY_OPTIONS_GBS = _parse_memory_options(os.getenv("OCI_MEMORY_GBS", ""), default=[1, 1, 1, 2, 2])
 
 # SAFETY CHECK: Verify the key actually loaded from GitHub Secrets
 if not public_ssh_key or public_ssh_key.strip() == "":
