@@ -95,8 +95,8 @@ except Exception as e:
     exit(1)
 
 total_attempts = 300              # fewer, more widely-spaced attempts
-base_capacity_sleep = 180         # 3 min base — 45-65s was still tripping
-                                   # OCI's LaunchInstance rate limit
+base_capacity_sleep = 90          # 1.5 min base — reduced from 180s for
+                                   # more frequent capacity retries
 capacity_jitter = 30              # +/- random seconds, still desynced
                                    # from other scripts but off a larger base
 rate_limit_sleep = 300            # longer wait after 429 / TooManyRequests

@@ -13,7 +13,9 @@ concurrency:
 jobs:
   attempt-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 350     # ~5h50m, safely under GitHub's 6-hour hard cap
+    timeout-minutes: 300     # 5h — safe margin under GitHub's 6h hard cap,
+                              # leaves a clean ~1h gap before the next
+                              # scheduled run
 
     steps:
       - name: Check out repository code
