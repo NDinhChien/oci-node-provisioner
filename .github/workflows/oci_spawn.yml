@@ -41,5 +41,4 @@ jobs:
           OCI_IMAGE_ID: ${{ secrets.OCI_IMAGE_ID }}
           OCI_PUBLIC_SSH_KEY: ${{ secrets.OCI_PUBLIC_SSH_KEY }}
           OCI_OCPUS: ${{ secrets.OCI_OCPUS }}
-          OCI_MEMORY_GBS: ${{ secrets.OCI_MEMORY_GBS }}
         run: python "Ampere24ram4cpu/bot.py"

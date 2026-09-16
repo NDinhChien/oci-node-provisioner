@@ -49,10 +49,54 @@ def _strip_wrapping_quotes(value: str) -> str:
 
 public_ssh_key = _strip_wrapping_quotes(os.getenv("OCI_PUBLIC_SSH_KEY", ""))
 
-# Instance sizing (override via env vars if you want, defaults to a small
-# request first since small shapes succeed far more often than 4/24)
-target_ocpus = float(os.getenv("OCI_OCPUS", "1"))
-target_memory_gbs = float(os.getenv("OCI_MEMORY_GBS", "6"))
+# Instance sizing
+# OCPU count and the list of candidate memory sizes (GB) are read from env
+# vars (OCI_OCPUS / OCI_MEMORY_GBS) so they can be set via GitHub Secrets
+# without editing this file. Memory is cycled through the list across
+# attempts, smallest first, since a smaller request fits into more
+# partially-free Ampere hosts and tends to land capacity faster than always
+# asking for the same fixed amount.
+#
+# OCI_OCPUS: an integer, e.g. "1"
+# OCI_MEMORY_GBS: a comma-separated list, e.g. "2,4,6"
+def _parse_ocpus(raw: str, default: int) -> int:
+    raw = raw.strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+        if value <= 0:
+            raise ValueError
+        return value
+    except ValueError:
+        print(f"WARNING: invalid OCI_OCPUS value '{raw}', falling back to default {default}")
+        return default
+
+
+def _parse_memory_options(raw: str, default: list) -> list:
+    raw = raw.strip()
+    if not raw:
+        return default
+    options = []
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            value = int(part)
+            if value <= 0:
+                raise ValueError
+            options.append(value)
+        except ValueError:
+            print(f"WARNING: skipping invalid OCI_MEMORY_GBS entry '{part}'")
+    if not options:
+        print(f"WARNING: no valid entries in OCI_MEMORY_GBS, falling back to default {default}")
+        return default
+    return options
+
+
+OCPUS = _parse_ocpus(os.getenv("OCI_OCPUS", ""), default=1)
+MEMORY_OPTIONS_GBS = _parse_memory_options(os.getenv("OCI_MEMORY_GBS", ""), default=[2, 4, 6])
 
 # SAFETY CHECK: Verify the key actually loaded from GitHub Secrets
 if not public_ssh_key or public_ssh_key.strip() == "":
@@ -107,8 +151,9 @@ consecutive_rate_limits = 0
 
 for i in range(1, total_attempts + 1):
     current_ad = ads[(i - 1) % len(ads)]
+    current_memory_gbs = MEMORY_OPTIONS_GBS[(i - 1) % len(MEMORY_OPTIONS_GBS)]
     print(f"[Attempt {i}/{total_attempts}] Requesting instance in {current_ad} "
-          f"({target_ocpus} OCPU / {target_memory_gbs} GB)...")
+          f"({OCPUS} OCPU / {current_memory_gbs} GB)...")
 
     try:
         request = oci.core.models.LaunchInstanceDetails(
@@ -117,8 +162,8 @@ for i in range(1, total_attempts + 1):
             availability_domain=current_ad,
             shape="VM.Standard.A1.Flex",
             shape_config=oci.core.models.LaunchInstanceShapeConfigDetails(
-                ocpus=target_ocpus,
-                memory_in_gbs=target_memory_gbs,
+                ocpus=OCPUS,
+                memory_in_gbs=current_memory_gbs,
             ),
             source_details=oci.core.models.InstanceSourceViaImageDetails(
                 source_type="image",

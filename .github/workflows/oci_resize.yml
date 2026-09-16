@@ -1,0 +1,38 @@
+name: OCI Instance Resizer
+on:
+  workflow_dispatch:         # manual trigger only — resizing is a one-off
+                              # action, not something to run on a schedule
+
+concurrency:
+  group: oci-a1-provisioner  # shares the group with the spawner workflow so
+  cancel-in-progress: false  # a resize can't run concurrently with a launch
+
+jobs:
+  resize-instance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15      # find instance, request resize, poll briefly —
+                              # should complete in a couple of minutes
+
+    steps:
+      - name: Check out repository code
+        uses: actions/checkout@v4
+
+      - name: Set up Python Environment
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install SDK Requirements
+        run: pip install -r requirements.txt
+
+      - name: Execute Python Resize Engine
+        env:
+          PYTHONUNBUFFERED: "1"
+          OCI_USER_ID: ${{ secrets.OCI_USER_ID }}
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          OCI_TENANCY_ID: ${{ secrets.OCI_TENANCY_ID }}
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+          OCI_RESIZE_OCPUS: ${{ secrets.OCI_RESIZE_OCPUS }}
+          OCI_RESIZE_MEMORY_GBS: ${{ secrets.OCI_RESIZE_MEMORY_GBS }}
+        run: python "Ampere24ram4cpu/resize.py"
