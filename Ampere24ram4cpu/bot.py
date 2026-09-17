@@ -96,7 +96,7 @@ def _parse_memory_options(raw: str, default: list) -> list:
 
 
 OCPUS = _parse_ocpus(os.getenv("OCI_OCPUS", ""), default=1)
-MEMORY_OPTIONS_GBS = _parse_memory_options(os.getenv("OCI_MEMORY_GBS", ""), default=[1, 1, 1, 2, 2])
+MEMORY_OPTIONS_GBS = _parse_memory_options(os.getenv("OCI_MEMORY_GBS", ""), default=[1])
 
 # SAFETY CHECK: Verify the key actually loaded from GitHub Secrets
 if not public_ssh_key or public_ssh_key.strip() == "":
@@ -139,7 +139,7 @@ except Exception as e:
     exit(1)
 
 total_attempts = 300              # fewer, more widely-spaced attempts
-base_capacity_sleep = 90          # 1.5 min base — reduced from 180s for
+base_capacity_sleep = 120         # 2 min base — reduced from 180s for
                                    # more frequent capacity retries
 capacity_jitter = 30              # +/- random seconds, still desynced
                                    # from other scripts but off a larger base
